@@ -125,13 +125,13 @@ search_logs() {
     echo ""
 
     if [ -n "$worktree" ]; then
-        pattern="$LOG_DIR/claude-${worktree}-*.log"
+        pattern="claude-${worktree}-*.log"
     else
-        pattern="$LOG_DIR/claude-*.log"
+        pattern="claude-*.log"
     fi
 
-    # Use grep to search, showing filename and line
-    grep -n "$search_term" $pattern 2>/dev/null || {
+    # Use find with grep to safely handle patterns and filenames with special characters
+    find "$LOG_DIR" -name "$pattern" -type f -exec grep -Hn "$search_term" {} + 2>/dev/null || {
         echo "No matches found"
         return
     }
@@ -165,10 +165,19 @@ case "${1:-list}" in
             local file="$1"
             if [ "$clean_mode" = true ]; then
                 # Strip ANSI codes and control characters for easier reading
-                # Using standard Unix tools: sed for ANSI codes, col -b for backspaces
-                sed -E 's/\x1B\[[0-9;?]*[a-zA-Z]//g; s/\x1B\][0-9;]*[^\x07]*\x07//g' "$file" | \
-                    col -b | \
-                    less -XF
+                # Using sed for ANSI codes, col -b for backspaces (if available)
+                if command -v col > /dev/null 2>&1; then
+                    sed -E 's/\x1B\[[0-9;?]*[a-zA-Z]//g; s/\x1B\][0-9;]*[^\x07]*\x07//g' "$file" | \
+                        col -b | \
+                        less -XF
+                else
+                    # col not available - warn user about limited cleaning
+                    echo "⚠️  'col' command not found - backspaces won't be processed" >&2
+                    echo "   For best results, use: $0 html $(basename "$file" .log)" >&2
+                    echo "" >&2
+                    sed -E 's/\x1B\[[0-9;?]*[a-zA-Z]//g; s/\x1B\][0-9;]*[^\x07]*\x07//g' "$file" | \
+                        less -XF
+                fi
             else
                 view_log "$file"
             fi

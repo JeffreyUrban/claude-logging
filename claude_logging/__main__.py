@@ -3,6 +3,7 @@
 import argparse
 import datetime
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -121,20 +122,32 @@ def claude_command(args):
     # Check if worktree mode is enabled (opt-in for backward compatibility)
     worktree_mode = os.environ.get('CLAUDE_LOGGING_WORKTREE_MODE', '').lower() in ('1', 'true', 'yes')
 
+    # Determine repository name and main worktree path (for filename placeholders)
+    repo_name = None
+    main_worktree_path = None
+    try:
+        result = subprocess.run(['git', 'worktree', 'list'], capture_output=True, text=True, check=True)
+        # First line is main worktree
+        main_worktree_path = result.stdout.split('\n')[0].split()[0]
+        repo_name = os.path.basename(main_worktree_path)
+    except (subprocess.CalledProcessError, IndexError):
+        # Not in a git repo or git not available
+        # repo_name stays None - will error if used in custom pattern, or use fallback in default mode
+        pass
+
     # Determine log directory
     log_dir = os.environ.get('CLAUDE_LOG_DIR')
 
     if not log_dir:
         if worktree_mode:
-            # Worktree mode: Try to find main worktree using git
-            try:
-                result = subprocess.run(['git', 'worktree', 'list'], capture_output=True, text=True, check=True)
-                # First line is main worktree
-                main_worktree = result.stdout.split('\n')[0].split()[0]
-                log_dir = os.path.join(main_worktree, 'logs')
-            except (subprocess.CalledProcessError, IndexError):
-                # Fall back to default if not in git repo
-                log_dir = os.path.expanduser('~/.claude/logs')
+            # Worktree mode: Use main worktree's logs/ directory
+            if main_worktree_path:
+                log_dir = os.path.join(main_worktree_path, 'logs')
+            else:
+                # Not in a git repo - error out
+                print('❌ Error: CLAUDE_LOGGING_WORKTREE_MODE is enabled but not in a git repository', file=sys.stderr)
+                print('   Either run from a git repository or disable worktree mode', file=sys.stderr)
+                sys.exit(1)
         else:
             # Default mode: use ~/.claude/logs
             log_dir = os.path.expanduser('~/.claude/logs')
@@ -148,8 +161,15 @@ def claude_command(args):
     if filename_pattern:
         # Custom pattern with placeholder support
         # Available placeholders: {worktree}, {repo}, {timestamp}, {date}, {time}, {datetime}
+        # {worktree} = current directory name, {repo} = main repository name
+
+        # Check if pattern uses {repo} but we're not in a git repository
+        if '{repo}' in filename_pattern and repo_name is None:
+            print('❌ Error: CLAUDE_LOGGING_FILENAME_PATTERN uses {repo} placeholder but not in a git repository', file=sys.stderr)
+            print('   Either run from a git repository or use a different placeholder', file=sys.stderr)
+            sys.exit(1)
+
         worktree_name = os.path.basename(os.getcwd())
-        repo_name = os.path.basename(os.getcwd())
         now = datetime.datetime.now()
         timestamp = now.strftime('%Y%m%d-%H%M%S')
         date = now.strftime('%Y%m%d')
@@ -168,7 +188,9 @@ def claude_command(args):
         log_file = os.path.join(log_dir, f'claude-{worktree_name}-{timestamp}.log')
     else:
         # Default mode: {repo}.{date}.{n}.log (original behavior)
-        repo_name = os.path.basename(os.getcwd())
+        # Use repo_name from git if available, otherwise fall back to current directory for backward compatibility
+        if repo_name is None:
+            repo_name = os.path.basename(os.getcwd())
         date = datetime.date.today().isoformat()
         n = 0
         while True:
@@ -202,7 +224,8 @@ def claude_command(args):
             cmd = ['script', '-q', '-F', log_file] + claude_cmd
         else:  # Linux
             # Linux syntax: script --flush --quiet --return --command "cmd" file
-            cmd = ['script', '--flush', '--quiet', '--return', '--command', ' '.join(claude_cmd), log_file]
+            # Use shlex.join() to safely handle arguments with spaces and special characters
+            cmd = ['script', '--flush', '--quiet', '--return', '--command', shlex.join(claude_cmd), log_file]
 
         # Execute command
         subprocess.run(cmd)

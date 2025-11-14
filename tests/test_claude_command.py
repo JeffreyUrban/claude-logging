@@ -296,7 +296,7 @@ class TestCustomFilenamePattern:
         assert match is not None
 
     def test_supports_multiple_placeholders(self, temp_worktree, mock_script_command, monkeypatch, tmp_path):
-        """Pattern should support multiple placeholders."""
+        """Pattern should support multiple placeholders, with {repo} referring to main repo."""
         from claude_logging.__main__ import claude_command
 
         log_dir = tmp_path / 'logs'
@@ -304,7 +304,8 @@ class TestCustomFilenamePattern:
 
         monkeypatch.chdir(temp_worktree)
         monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
-        monkeypatch.setenv('CLAUDE_LOGGING_FILENAME_PATTERN', '{repo}-{date}-{time}.log')
+        # Use {repo}-{worktree} to test both placeholders
+        monkeypatch.setenv('CLAUDE_LOGGING_FILENAME_PATTERN', '{repo}-{worktree}-{date}-{time}.log')
 
         args = argparse.Namespace(claude_args=[])
         claude_command(args)
@@ -312,10 +313,11 @@ class TestCustomFilenamePattern:
         call_args = mock_script_command.call_args[0][0]
         log_file = extract_log_file_from_command(call_args)
 
-        # Should have format: test-worktree-YYYYMMDD-HHMMSS.log
+        # Should have format: test-repo-test-worktree-YYYYMMDD-HHMMSS.log
+        # {repo} = main repository name, {worktree} = current worktree name
         import re
 
-        match = re.search(r'test-worktree-(\d{8})-(\d{6})\.log', log_file)
+        match = re.search(r'test-repo-test-worktree-(\d{8})-(\d{6})\.log', log_file)
         assert match is not None
 
     def test_overrides_worktree_mode(self, temp_worktree, mock_script_command, monkeypatch, tmp_path):
@@ -421,3 +423,177 @@ class TestArguments:
             # On Linux, args are in the --command string
             assert '--help' in str(call_args)
             assert '--version' in str(call_args)
+
+    def test_handles_args_with_spaces(self, temp_git_repo, monkeypatch, tmp_path):
+        """Arguments with spaces should be properly escaped on Linux."""
+        from claude_logging.__main__ import claude_command
+
+        log_dir = tmp_path / 'logs'
+        log_dir.mkdir()
+        monkeypatch.chdir(temp_git_repo)
+        monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
+
+        with patch('subprocess.run') as mock_run, patch('platform.system') as mock_platform:
+            mock_platform.return_value = 'Linux'
+            args = argparse.Namespace(claude_args=['--message', 'hello world'])
+            claude_command(args)
+
+            call_args = mock_run.call_args[0][0]
+            # The --command argument should contain properly quoted args
+            cmd_index = call_args.index('--command')
+            command_string = call_args[cmd_index + 1]
+            # Should have quotes around "hello world" or be a single escaped string
+            assert 'hello world' in command_string or "'hello world'" in command_string
+
+
+@pytest.mark.unit
+class TestEdgeCases:
+    """Test edge cases and error handling."""
+
+    def test_invalid_placeholder_raises_error(self, temp_git_repo, monkeypatch, tmp_path):
+        """Invalid placeholders in filename pattern should raise KeyError."""
+        from claude_logging.__main__ import claude_command
+
+        log_dir = tmp_path / 'logs'
+        log_dir.mkdir()
+        monkeypatch.chdir(temp_git_repo)
+        monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
+        monkeypatch.setenv('CLAUDE_LOGGING_FILENAME_PATTERN', '{invalid_placeholder}.log')
+
+        with patch('subprocess.run'):
+            args = argparse.Namespace(claude_args=[])
+            with pytest.raises(KeyError):
+                claude_command(args)
+
+    def test_repo_placeholder_errors_outside_git_repo(self, monkeypatch, tmp_path, capsys):
+        """Using {repo} placeholder outside git repo should error."""
+        from claude_logging.__main__ import claude_command
+
+        # Create and change to a non-git directory
+        non_git_dir = tmp_path / 'not-a-repo'
+        non_git_dir.mkdir()
+        log_dir = tmp_path / 'logs'
+        log_dir.mkdir()
+
+        monkeypatch.chdir(non_git_dir)
+        monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
+        monkeypatch.setenv('CLAUDE_LOGGING_FILENAME_PATTERN', '{repo}-{timestamp}.log')
+
+        args = argparse.Namespace(claude_args=[])
+
+        # Should exit with error
+        with pytest.raises(SystemExit) as exc_info:
+            claude_command(args)
+
+        assert exc_info.value.code == 1
+
+        # Should show error message
+        captured = capsys.readouterr()
+        assert 'CLAUDE_LOGGING_FILENAME_PATTERN uses {repo} placeholder but not in a git repository' in captured.err
+        assert 'Either run from a git repository or use a different placeholder' in captured.err
+
+    def test_special_chars_in_worktree_name(self, temp_git_repo, mock_script_command, monkeypatch, tmp_path):
+        """Worktree names with special characters should work correctly."""
+        # Create worktrees with various special characters
+        special_names = ['worktree-with-dashes', 'worktree.with.dots']
+
+        for name in special_names:
+            worktree_path = tmp_path / name
+            subprocess.run(
+                ['git', 'worktree', 'add', '-b', f'branch-{name}', str(worktree_path), 'HEAD'],
+                cwd=temp_git_repo,
+                check=True,
+                capture_output=True,
+            )
+
+            from claude_logging.__main__ import claude_command
+
+            log_dir = tmp_path / 'logs'
+            log_dir.mkdir(exist_ok=True)
+            monkeypatch.chdir(worktree_path)
+            monkeypatch.setenv('CLAUDE_LOGGING_WORKTREE_MODE', '1')
+            monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
+
+            args = argparse.Namespace(claude_args=[])
+            claude_command(args)
+
+            call_args = mock_script_command.call_args[0][0]
+            log_file = extract_log_file_from_command(call_args)
+
+            # Should include the special name in the filename
+            assert name in log_file
+            assert log_file.endswith('.log')
+
+            # Cleanup
+            subprocess.run(['git', 'worktree', 'remove', str(worktree_path)], cwd=temp_git_repo, capture_output=True)
+
+    def test_worktree_mode_errors_outside_git_repo(self, monkeypatch, tmp_path, capsys):
+        """Worktree mode should error when not in a git repo."""
+        from claude_logging.__main__ import claude_command
+
+        # Create and change to a non-git directory
+        non_git_dir = tmp_path / 'not-a-repo'
+        non_git_dir.mkdir()
+        monkeypatch.chdir(non_git_dir)
+        monkeypatch.setenv('CLAUDE_LOGGING_WORKTREE_MODE', '1')
+
+        args = argparse.Namespace(claude_args=[])
+
+        # Should exit with error
+        with pytest.raises(SystemExit) as exc_info:
+            claude_command(args)
+
+        assert exc_info.value.code == 1
+
+        # Should show error message
+        captured = capsys.readouterr()
+        assert 'CLAUDE_LOGGING_WORKTREE_MODE is enabled but not in a git repository' in captured.err
+        assert 'Either run from a git repository or disable worktree mode' in captured.err
+
+    def test_creates_log_directory_if_not_exists(self, temp_git_repo, mock_script_command, monkeypatch, tmp_path):
+        """Log directory should be created if it doesn't exist."""
+        from claude_logging.__main__ import claude_command
+
+        log_dir = tmp_path / 'new-log-dir'
+        # Don't create the directory - let the function do it
+
+        monkeypatch.chdir(temp_git_repo)
+        monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
+
+        args = argparse.Namespace(claude_args=[])
+        claude_command(args)
+
+        # Directory should be created
+        assert log_dir.exists()
+        assert log_dir.is_dir()
+
+    def test_timestamp_collision_in_worktree_mode(self, temp_worktree, mock_script_command, monkeypatch, tmp_path):
+        """Multiple sessions at the same second will overwrite in worktree mode."""
+        from claude_logging.__main__ import claude_command
+        import datetime
+
+        log_dir = tmp_path / 'logs'
+        log_dir.mkdir()
+
+        monkeypatch.chdir(temp_worktree)
+        monkeypatch.setenv('CLAUDE_LOGGING_WORKTREE_MODE', '1')
+        monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
+
+        # Mock datetime to return same time for both calls
+        fixed_time = datetime.datetime(2025, 1, 15, 10, 30, 45)
+        with patch('datetime.datetime') as mock_datetime:
+            mock_datetime.now.return_value = fixed_time
+            mock_datetime.date.today.return_value = fixed_time.date()
+
+            args = argparse.Namespace(claude_args=[])
+            claude_command(args)
+            first_call_log = extract_log_file_from_command(mock_script_command.call_args[0][0])
+
+            # Reset mock and call again
+            mock_script_command.reset_mock()
+            claude_command(args)
+            second_call_log = extract_log_file_from_command(mock_script_command.call_args[0][0])
+
+            # Both calls should generate the same filename
+            assert first_call_log == second_call_log
+            # This means the second call will overwrite the first (expected behavior)

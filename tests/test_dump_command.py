@@ -169,6 +169,7 @@ class TestGetDefaultOutputPath:
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 class TestRealClaudeSession:
     """Test with real Claude Code session log."""
 
