@@ -131,6 +131,7 @@ search_logs() {
     fi
 
     # Use find with grep to safely handle patterns and filenames with special characters
+    # -H shows filename with matches, -n shows line numbers
     find "$LOG_DIR" -name "$pattern" -type f -exec grep -Hn "$search_term" {} + 2>/dev/null || {
         echo "No matches found"
         return

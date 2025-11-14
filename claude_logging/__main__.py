@@ -169,7 +169,8 @@ def claude_command(args):
             print('   Either run from a git repository or use a different placeholder', file=sys.stderr)
             sys.exit(1)
 
-        worktree_name = os.path.basename(os.getcwd())
+        # Current directory name (used for {worktree} placeholder and as {repo} fallback)
+        current_dir = os.path.basename(os.getcwd())
         now = datetime.datetime.now()
         timestamp = now.strftime('%Y%m%d-%H%M%S')
         date = now.strftime('%Y%m%d')
@@ -178,7 +179,7 @@ def claude_command(args):
 
         # Format the filename with available variables
         filename = filename_pattern.format(
-            worktree=worktree_name, repo=repo_name, timestamp=timestamp, date=date, time=time, datetime=datetime_str
+            worktree=current_dir, repo=repo_name, timestamp=timestamp, date=date, time=time, datetime=datetime_str
         )
         log_file = os.path.join(log_dir, filename)
     elif worktree_mode:
