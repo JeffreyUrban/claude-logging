@@ -302,20 +302,25 @@ This fork includes example wrapper scripts for worktree workflows in [`examples/
 See [`examples/worktree/README.md`](examples/worktree/README.md) for:
 - Complete usage guide
 - Multi-worktree scenarios
-- Integration options (project scripts, shell aliases, git hooks)
+- Integration options (scripts, shell aliases, JetBrains IDE, git hooks)
 - Team collaboration workflows
 - Tips and best practices
 
 **Quick integration:**
 ```bash
-# Copy to your project root
+# Shell scripts
 cp examples/worktree/*.sh /path/to/your/project/
 chmod +x /path/to/your/project/*.sh
+
+# JetBrains IDE run configurations
+mkdir -p /path/to/your/project/.run
+cp examples/worktree/JetBrains/Claude_Code_Worktree_Mode.run.xml /path/to/your/project/.run/
+cp examples/JetBrains/Claude_Code_Default_Mode.run.xml /path/to/your/project/.run/
 ```
 
 ## Testing
 
-This fork includes comprehensive test coverage:
+This fork adds test coverage:
 
 ```bash
 # Run all tests

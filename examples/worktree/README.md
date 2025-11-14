@@ -21,9 +21,6 @@ Simple wrapper to launch Claude Code with worktree-mode logging enabled.
 
 # With custom log directory
 CLAUDE_LOG_DIR=/tmp/logs ./start-claude.sh
-
-# Pass arguments to Claude
-./start-claude.sh --help
 ```
 
 **Integration:**
@@ -47,10 +44,6 @@ Utility for viewing, searching, and converting worktree logs.
 # Strip ANSI codes for easier reading
 ./view-logs.sh view myproject --clean
 
-# Tail latest log in real-time
-./view-logs.sh tail
-./view-logs.sh tail myproject
-
 # Search across logs
 ./view-logs.sh search "authentication"
 ./view-logs.sh search "error" myproject
@@ -59,14 +52,6 @@ Utility for viewing, searching, and converting worktree logs.
 ./view-logs.sh html myproject
 ./view-logs.sh html myproject 20251113
 ```
-
-**HTML Conversion:**
-The `html` command converts raw terminal logs to clean, readable HTML:
-- Eliminates duplicate lines from TUI redraws
-- Preserves syntax highlighting and colors
-- Clickable line numbers with permalinks
-- Light/dark theme toggle
-- ~90-96% size reduction
 
 **Integration:**
 Copy this script to your project root or add to your PATH. It automatically finds the main worktree's `logs/` directory.
@@ -101,10 +86,10 @@ This creates a log in the main worktree's `logs/` directory.
 
 While Claude is running, from another terminal:
 ```bash
-# Tail the active session
+# Tail the active session to stream updates
 ./view-logs.sh tail myworktree
 
-# Or convert to HTML to see progress
+# Or convert to HTML during session for a clean view, with no further updates
 ./view-logs.sh html myworktree
 open logs/claude-myworktree-*.html
 ```
@@ -151,21 +136,6 @@ cd ~/project  # Main worktree
 All logs centralized in `~/project/logs/`:
 - `claude-feature-auth-20251113-143000.log`
 - `claude-feature-ui-20251113-143100.log`
-
-### Team Collaboration
-
-Share Claude sessions with team members:
-
-```bash
-# After a productive session
-./view-logs.sh html feature-auth
-git add logs/claude-feature-auth-20251113-143000.html
-git commit -m "Add Claude session: authentication implementation"
-git push
-
-# Team members can view
-open logs/claude-feature-auth-20251113-143000.html
-```
 
 ## Environment Variables
 
@@ -216,7 +186,41 @@ claude-logs list         # View all logs
 claude-logs html main    # Convert latest main worktree log
 ```
 
-### Option 3: Git Hooks
+### Option 3: JetBrains IDE Run Configuration
+
+**`JetBrains/Claude_Code_Worktree_Mode.run.xml`** - Run configuration for worktree mode
+
+Launches Claude Code with `CLAUDE_LOGGING_WORKTREE_MODE=1`, storing logs in main worktree's `logs/` directory with worktree names in filenames.
+
+**Installation:**
+```bash
+# Copy to your project's .run directory
+mkdir -p .run
+cp examples/worktree/JetBrains/Claude_Code_Worktree_Mode.run.xml .run/
+```
+
+You may need to restart your IDE or select **File → Reload All from Disk**.
+
+**Usage:**
+1. Select "Claude->Log (Worktree)" from the run configuration dropdown
+2. Click Run or use keyboard shortcut
+3. Claude will launch with worktree logging enabled
+4. Logs appear in main worktree's `logs/` directory
+
+**Customization:**
+Edit the XML file to add custom environment variables:
+
+```xml
+<envs>
+  <env name="CLAUDE_LOGGING_WORKTREE_MODE" value="1" />
+  <!-- Override log directory -->
+  <env name="CLAUDE_LOG_DIR" value="/custom/path/logs" />
+  <!-- Custom filename pattern -->
+  <env name="CLAUDE_LOGGING_FILENAME_PATTERN" value="session-{worktree}-{timestamp}.log" />
+</envs>
+```
+
+### Option 4: Git Hooks
 
 Automatically log Claude sessions as part of your workflow:
 

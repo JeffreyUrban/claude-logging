@@ -180,12 +180,12 @@ def claude_command(args):
     # Combine all remaining args into command string
     claude_args = args.claude_args if hasattr(args, 'claude_args') else []
 
-    # Print session info
+    # Print session info (always, regardless of mode)
+    print('🤖 Starting Claude Code with session logging')
     if worktree_mode:
-        print('🤖 Starting Claude Code with session logging')
         print(f'📁 Worktree: {os.path.basename(os.getcwd())}')
-        print(f'📝 Log file: {log_file}')
-        print('')
+    print(f'📝 Log file: {log_file}')
+    print('')
 
     try:
         # Build the claude command including all arguments
@@ -207,11 +207,11 @@ def claude_command(args):
         # Execute command
         subprocess.run(cmd)
 
-        if worktree_mode:
-            print('')
-            print('✅ Session ended')
-            print(f'📝 Log saved: {log_file}')
-            print(f'💡 Convert to HTML: python -m claude_logging dump {log_file}')
+        # Print session end info (always)
+        print('')
+        print('✅ Session ended')
+        print(f'📝 Log saved: {log_file}')
+        print(f'💡 Convert to HTML: python -m claude_logging dump {log_file}')
     except Exception as e:
         print(f'Error executing claude command: {e}', file=sys.stderr)
         sys.exit(1)

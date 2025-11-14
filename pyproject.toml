@@ -32,6 +32,12 @@ keywords = ["claude", "logging", "ansi", "terminal", "html", "conversion"]
 "Homepage" = "https://github.com/antocuni/claude-logging"
 "Bug Tracker" = "https://github.com/antocuni/claude-logging/issues"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.0.0",
+]
+
 [project.scripts]
 claude-logging = "claude_logging.__main__:main"
 
@@ -43,6 +49,21 @@ name = "claude_logging.pytermdump"
 sources = ["claude_logging/pytermdump.c"]
 extra-compile-args = ["-Wall"]
 py-limited-api = true  # Use the stable ABI
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow tests",
+]
 
 [tool.cibuildwheel]
 # Build only CPython 3.8 (which will work for 3.8+ with stable ABI)
