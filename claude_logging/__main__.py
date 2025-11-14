@@ -115,39 +115,45 @@ def claude_command(args):
     Execute the claude command and log the session.
     This is the default mode that:
     1. Creates a log directory if needed
-    2. Generates a unique log filename based on worktree and timestamp
+    2. Generates a unique log filename based on repo, worktree and timestamp
     3. Uses script command to record the session
     4. Passes all command line arguments to the claude command
     """
     # Check if worktree mode is enabled (opt-in for backward compatibility)
     worktree_mode = os.environ.get('CLAUDE_LOGGING_WORKTREE_MODE', '').lower() in ('1', 'true', 'yes')
 
-    # Determine repository name and main worktree path (for filename placeholders)
-    repo_name = None
-    main_worktree_path = None
+    # Determine if we're in a git repository and get git-specific info
+    in_git_repo = False
+    git_repo_name = None  # Name of the main repository (from git worktree list)
+    git_main_worktree_path = None  # Path to main worktree root
+    git_worktree_name = None  # Current worktree/directory name (only meaningful in git context)
     try:
         result = subprocess.run(['git', 'worktree', 'list'], capture_output=True, text=True, check=True)
         # First line is main worktree
-        main_worktree_path = result.stdout.split('\n')[0].split()[0]
-        repo_name = os.path.basename(main_worktree_path)
+        git_main_worktree_path = result.stdout.split('\n')[0].split()[0]
+        git_repo_name = os.path.basename(git_main_worktree_path)
+        git_worktree_name = os.path.basename(os.getcwd())
+        in_git_repo = True
     except (subprocess.CalledProcessError, IndexError):
         # Not in a git repo or git not available
-        # repo_name stays None - will error if used in custom pattern, or use fallback in default mode
-        pass
+        in_git_repo = False
+
+    # Current directory name (used in default mode)
+    current_dir_name = os.path.basename(os.getcwd())
+
+    # Worktree mode requires git repository
+    if worktree_mode and not in_git_repo:
+        print('❌ Error: CLAUDE_LOGGING_WORKTREE_MODE is enabled but not in a git repository', file=sys.stderr)
+        print('   Either run from a git repository or disable worktree mode', file=sys.stderr)
+        sys.exit(1)
 
     # Determine log directory
     log_dir = os.environ.get('CLAUDE_LOG_DIR')
 
     if not log_dir:
         if worktree_mode:
-            # Worktree mode: Use main worktree's logs/ directory
-            if main_worktree_path:
-                log_dir = os.path.join(main_worktree_path, 'logs')
-            else:
-                # Not in a git repo - error out
-                print('❌ Error: CLAUDE_LOGGING_WORKTREE_MODE is enabled but not in a git repository', file=sys.stderr)
-                print('   Either run from a git repository or disable worktree mode', file=sys.stderr)
-                sys.exit(1)
+            # Use main worktree's logs/ directory
+            log_dir = os.path.join(git_main_worktree_path, 'logs')
         else:
             # Default mode: use ~/.claude/logs
             log_dir = os.path.expanduser('~/.claude/logs')
@@ -155,47 +161,56 @@ def claude_command(args):
     os.makedirs(log_dir, exist_ok=True)
 
     # Generate log filename
-    # Check for custom filename pattern
     filename_pattern = os.environ.get('CLAUDE_LOGGING_FILENAME_PATTERN')
 
     if filename_pattern:
-        # Custom pattern with placeholder support
+        # Custom pattern specified
         # Available placeholders: {worktree}, {repo}, {timestamp}, {date}, {time}, {datetime}
-        # {worktree} = current directory name, {repo} = main repository name
+        # {worktree} = current worktree/directory name (git-only)
+        # {repo} = main repository name (git-only)
+        # {timestamp}, {date}, {time}, {datetime} = always available
 
-        # Check if pattern uses {repo} but we're not in a git repository
-        if '{repo}' in filename_pattern and repo_name is None:
-            print('❌ Error: CLAUDE_LOGGING_FILENAME_PATTERN uses {repo} placeholder but not in a git repository', file=sys.stderr)
-            print('   Either run from a git repository or use a different placeholder', file=sys.stderr)
-            sys.exit(1)
+        # Check if pattern uses git-specific placeholders - both require git repository
+        if '{repo}' in filename_pattern or '{worktree}' in filename_pattern:
+            if not in_git_repo:
+                placeholders = []
+                if '{repo}' in filename_pattern:
+                    placeholders.append('{repo}')
+                if '{worktree}' in filename_pattern:
+                    placeholders.append('{worktree}')
+                print(f'❌ Error: CLAUDE_LOGGING_FILENAME_PATTERN uses {", ".join(placeholders)} placeholder(s) but not in a git repository', file=sys.stderr)
+                print('   Either run from a git repository or remove these placeholders', file=sys.stderr)
+                sys.exit(1)
 
-        # Current directory name (used for {worktree} placeholder and as {repo} fallback)
-        current_dir = os.path.basename(os.getcwd())
+        # Prepare placeholder values
         now = datetime.datetime.now()
         timestamp = now.strftime('%Y%m%d-%H%M%S')
         date = now.strftime('%Y%m%d')
         time = now.strftime('%H%M%S')
         datetime_str = now.strftime('%Y%m%d-%H%M%S')
 
-        # Format the filename with available variables
+        # Format the filename - git placeholders only available if in git repo
         filename = filename_pattern.format(
-            worktree=current_dir, repo=repo_name, timestamp=timestamp, date=date, time=time, datetime=datetime_str
+            worktree=git_worktree_name if in_git_repo else None,
+            repo=git_repo_name if in_git_repo else None,
+            timestamp=timestamp,
+            date=date,
+            time=time,
+            datetime=datetime_str
         )
         log_file = os.path.join(log_dir, filename)
     elif worktree_mode:
-        # Worktree mode: claude-<worktree>-YYYYMMDD-HHMMSS.log
-        worktree_name = os.path.basename(os.getcwd())
+        # Default for Worktree mode: claude-<worktree>-YYYYMMDD-HHMMSS.log
+        # Note: worktree_mode already validated we're in a git repo above
         timestamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
-        log_file = os.path.join(log_dir, f'claude-{worktree_name}-{timestamp}.log')
+        log_file = os.path.join(log_dir, f'claude-{git_worktree_name}-{timestamp}.log')
     else:
-        # Default mode: {repo}.{date}.{n}.log (original behavior)
-        # Use repo_name from git if available, otherwise fall back to current directory for backward compatibility
-        if repo_name is None:
-            repo_name = os.path.basename(os.getcwd())
+        # Default mode: <name>.{date}.{n}.log
+        # Uses current directory name (not git-specific)
         date = datetime.date.today().isoformat()
         n = 0
         while True:
-            log_file = os.path.join(log_dir, f'{repo_name}.{date}.{n}.log')
+            log_file = os.path.join(log_dir, f'{current_dir_name}.{date}.{n}.log')
             if not os.path.exists(log_file):
                 break
             n += 1
@@ -206,7 +221,7 @@ def claude_command(args):
     # Print session info (always, regardless of mode)
     print('🤖 Starting Claude Code with session logging')
     if worktree_mode:
-        print(f'📁 Worktree: {os.path.basename(os.getcwd())}')
+        print(f'📁 Worktree: {git_worktree_name}')
     print(f'📝 Log file: {log_file}')
     print('')
 

@@ -489,8 +489,63 @@ class TestEdgeCases:
 
         # Should show error message
         captured = capsys.readouterr()
-        assert 'CLAUDE_LOGGING_FILENAME_PATTERN uses {repo} placeholder but not in a git repository' in captured.err
-        assert 'Either run from a git repository or use a different placeholder' in captured.err
+        assert '{repo}' in captured.err
+        assert 'not in a git repository' in captured.err
+
+    def test_worktree_placeholder_errors_outside_git_repo(self, monkeypatch, tmp_path, capsys):
+        """Using {worktree} placeholder outside git repo should error."""
+        from claude_logging.__main__ import claude_command
+
+        # Create and change to a non-git directory
+        non_git_dir = tmp_path / 'not-a-repo'
+        non_git_dir.mkdir()
+        log_dir = tmp_path / 'logs'
+        log_dir.mkdir()
+
+        monkeypatch.chdir(non_git_dir)
+        monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
+        monkeypatch.setenv('CLAUDE_LOGGING_FILENAME_PATTERN', '{worktree}-{timestamp}.log')
+
+        args = argparse.Namespace(claude_args=[])
+
+        # Should exit with error
+        with pytest.raises(SystemExit) as exc_info:
+            claude_command(args)
+
+        assert exc_info.value.code == 1
+
+        # Should show error message
+        captured = capsys.readouterr()
+        assert '{worktree}' in captured.err
+        assert 'not in a git repository' in captured.err
+
+    def test_both_placeholders_error_outside_git_repo(self, monkeypatch, tmp_path, capsys):
+        """Using both {repo} and {worktree} placeholders outside git repo should error with both listed."""
+        from claude_logging.__main__ import claude_command
+
+        # Create and change to a non-git directory
+        non_git_dir = tmp_path / 'not-a-repo'
+        non_git_dir.mkdir()
+        log_dir = tmp_path / 'logs'
+        log_dir.mkdir()
+
+        monkeypatch.chdir(non_git_dir)
+        monkeypatch.setenv('CLAUDE_LOG_DIR', str(log_dir))
+        monkeypatch.setenv('CLAUDE_LOGGING_FILENAME_PATTERN', '{repo}-{worktree}-{timestamp}.log')
+
+        args = argparse.Namespace(claude_args=[])
+
+        # Should exit with error
+        with pytest.raises(SystemExit) as exc_info:
+            claude_command(args)
+
+        assert exc_info.value.code == 1
+
+        # Should show error message with both placeholders
+        captured = capsys.readouterr()
+        assert '{repo}' in captured.err
+        assert '{worktree}' in captured.err
+        assert 'not in a git repository' in captured.err
 
     def test_special_chars_in_worktree_name(self, temp_git_repo, mock_script_command, monkeypatch, tmp_path):
         """Worktree names with special characters should work correctly."""
